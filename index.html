@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Property Map Demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet' />
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: Arial, sans-serif;
+        }
+        #map { 
+            position: absolute; 
+            top: 50px;
+            bottom: 0; 
+            width: 100%; 
+        }
+        #info {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        #info h3 {
+            margin: 0 0 5px 0;
+            font-size: 18px;
+        }
+        #info p {
+            margin: 0;
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 2000;
+            font-family: Arial, sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<div id="loading">Loading map libraries...</div>
+<div id="info">
+    <h3>🗺️ Property Map</h3>
+    <p>Click on any property boundary to see information</p>
+</div>
+<div id="map"></div>
+
+<script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
+<script>
+    // Wait for everything to load
+    window.addEventListener('load', function() {
+        // Check if maplibregl loaded
+        if (typeof maplibregl === 'undefined') {
+            document.getElementById('loading').innerHTML = 
+                '<strong>Error:</strong> Could not load mapping library.<br>' +
+                'Please check your internet connection.';
+            return;
+        }
+
+        document.getElementById('loading').innerHTML = 'Initializing map...';
+
+        // Sample empty data to start
+        const emptyData = {"type": "FeatureCollection", "features": []};
+
+        // Create the map
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: {
+                version: 8,
+                sources: {
+                    'osm': {
+                        type: 'raster',
+                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        tileSize: 256,
+                        attribution: '© OpenStreetMap contributors'
+                    },
+                    'properties': {
+                        type: 'geojson',
+                        data: emptyData
+                    }
+                },
+                layers: [
+                    {
+                        id: 'osm-tiles',
+                        type: 'raster',
+                        source: 'osm',
+                        minzoom: 0,
+                        maxzoom: 19
+                    },
+                    {
+                        id: 'properties-fill',
+                        type: 'fill',
+                        source: 'properties',
+                        paint: {
+                            'fill-color': '#0080ff',
+                            'fill-opacity': 0.3
+                        }
+                    },
+                    {
+                        id: 'properties-outline',
+                        type: 'line',
+                        source: 'properties',
+                        paint: {
+                            'line-color': '#000080',
+                            'line-width': 2
+                        }
+                    }
+                ]
+            },
+            center: [-75.55477, 2.193241], // Your coordinates
+            zoom: 10
+        });
+
+        // Add navigation controls
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        // Wait for map to load, then load data
+        map.on('load', function() {
+            document.getElementById('loading').innerHTML = 'Loading property data...';
+            
+            // Load your GeoJSON file
+            fetch('my_properties.geojson')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Could not find my_properties.geojson file');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Update the map data
+                    map.getSource('properties').setData(data);
+                    
+                    // Hide loading message
+                    document.getElementById('loading').classList.add('hidden');
+                    
+                    console.log('Successfully loaded', data.features.length, 'properties');
+                    
+                    // Zoom to fit the data
+                    if (data.features.length > 0) {
+                        const bounds = new maplibregl.LngLatBounds();
+                        data.features.forEach(feature => {
+                            if (feature.geometry.type === 'Polygon') {
+                                feature.geometry.coordinates[0].forEach(coord => {
+                                    bounds.extend(coord);
+                                });
+                            }
+                        });
+                        map.fitBounds(bounds, { padding: 50 });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading properties:', error);
+                    document.getElementById('loading').innerHTML = 
+                        '<strong>Error loading data:</strong><br>' + 
+                        error.message + '<br><br>' +
+                        '<small>Make sure "my_properties.geojson" is in the same folder as this HTML file.</small>';
+                });
+        });
+
+        // Add popup on click
+        map.on('click', 'properties-fill', function(e) {
+            const props = e.features[0].properties;
+            
+            // Build HTML for all properties
+            let html = '<div style="font-family: Arial, sans-serif;">';
+            html += '<h3 style="margin: 0 0 10px 0; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px;">Property Information</h3>';
+            html += '<table style="width: 100%; font-size: 13px;">';
+            
+            // Loop through all properties and display them
+            let rowCount = 0;
+            for (const [key, value] of Object.entries(props)) {
+                const bgColor = rowCount % 2 === 0 ? '' : 'background: #f8f9fa;';
+                html += `<tr style="${bgColor}">`;
+                html += `<td style="padding: 4px 8px 4px 0; font-weight: bold;">${key}:</td>`;
+                html += `<td style="padding: 4px 0;">${value}</td>`;
+                html += '</tr>';
+                rowCount++;
+            }
+            
+            html += '</table></div>';
+            
+            new maplibregl.Popup()
+                .setLngLat(e.lngLat)
+                .setHTML(html)
+                .addTo(map);
+        });
+
+        // Change cursor on hover
+        map.on('mouseenter', 'properties-fill', function() {
+            map.getCanvas().style.cursor = 'pointer';
+        });
+        
+        map.on('mouseleave', 'properties-fill', function() {
+            map.getCanvas().style.cursor = '';
+        });
+    });
+</script>
+</body>
+</html>
